@@ -3,14 +3,14 @@ from django.http import HttpResponse
 from django.core.exceptions import ValidationError
 from django.conf import settings
 import os
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from .models import Teacher
 
-def process_and_send_emails(modeladmin, request, queryset):
+def process_pdf_and_send_emails(modeladmin, request, queryset):
     # Iterate through selected Excel files
     for excel_file in queryset:
         # Load the Excel file
@@ -70,4 +70,55 @@ def process_and_send_emails(modeladmin, request, queryset):
     modeladmin.message_user(request, "PDFs generated and emails sent for selected Excel files.")
 
 # Define a description for the custom admin action
-process_and_send_emails.short_description = "Generate PDFs and Send Emails"
+process_pdf_and_send_emails.short_description = "Generate PDFs and Send Emails"
+
+
+def process_sheet_and_send_emails(modeladmin, request, queryset):
+    # Iterate through selected Excel files
+    for excel_file in queryset:
+        # Load the Excel file
+        file_path = excel_file.file.path
+        try:
+            wb = load_workbook(file_path, data_only=True)
+        except Exception as e:
+            raise ValidationError(f"Error loading the Excel file: {str(e)}")
+
+        # Iterate through sheets in the Excel file
+        for sheet_name in wb.sheetnames:
+            # Check if a teacher with this sheet_name exists
+            try:
+                teacher = Teacher.objects.get(sheet_name=sheet_name)
+            except Teacher.DoesNotExist:
+                continue
+
+            # Create a new Excel workbook containing only this sheet
+            buffer = BytesIO()
+            sheet = wb[sheet_name]
+            new_wb = Workbook()
+            new_ws = new_wb.active
+
+            for row in sheet.iter_rows():
+                for cell in row:
+                    new_ws[cell.coordinate] = cell.value
+
+            new_wb.save(buffer)
+
+            # Send the Excel sheet to the teacher's email
+            subject = f'{teacher.name}! Your Excel Sheet'
+            message = 'Please find the attached Excel sheet for your review.'
+            from_email = os.environ.get("EMAIL_FROM")
+            recipient_list = [teacher.email]
+
+            excel_sheet = buffer.getvalue()
+            buffer.close()
+
+            email = EmailMessage(subject, message, from_email, recipient_list)
+            email.attach(f'{sheet_name}.xlsx', excel_sheet, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            email.send()
+
+    # Provide feedback to the admin user
+    modeladmin.message_user(request, "Emails sent for selected Excel files.")
+
+
+# Define a description for the custom admin action
+process_sheet_and_send_emails.short_description = "Generate Sheets and Send Emails"
