@@ -23,12 +23,15 @@ def process_pdf_and_send_emails(modeladmin, request, queryset):
         # Iterate through sheets in the Excel file
         for sheet_name in wb.sheetnames:
             # Check if a teacher with this sheet_name exists
-            try:
-                teacher = Teacher.objects.get(sheet_name=sheet_name)
-            except Teacher.DoesNotExist:
+            teachers = Teacher.objects.filter(sheet_name=sheet_name)
+
+            if not teachers:
                 continue
 
-            # Create a PDF for the teacher's sheet
+            # Collect email addresses of all teachers for this sheet
+            recipient_list = [teacher.email for teacher in teachers]
+
+            # Create a PDF for the sheet
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=letter)
             elements = []
@@ -41,29 +44,28 @@ def process_pdf_and_send_emails(modeladmin, request, queryset):
 
             table = Table(data)
             table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey), # Header row background color
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), # Header text color
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), # Centered alignment
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),  # Header row background color
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),  # Header text color
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),  # Centered alignment
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige), # Table body background color
-                ('GRID', (0, 0), (-1, -1), 1, colors.black) # Gridlines
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),  # Table body background color
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)  # Gridlines
             ]))
 
             elements.append(table)
             doc.build(elements)
 
-            # Send the PDF to the teacher's email
-            subject = f'{teacher.name}! Your Excel Sheet'
+            # Send the PDF to the teachers' emails
+            subject = f'Your PDF file'
             message = 'Please find the attached PDF file containing your Excel sheet.'
             from_email = os.environ.get("EMAIL_FROM")
-            recipient_list = [teacher.email]
 
             pdf = buffer.getvalue()
             buffer.close()
 
             email = EmailMessage(subject, message, from_email, recipient_list)
-            email.attach(f'{sheet_name}', pdf, 'application/pdf')
+            email.attach(f'{sheet_name}.pdf', pdf, 'application/pdf')
             email.send()
 
     # Provide feedback to the admin user
@@ -71,6 +73,7 @@ def process_pdf_and_send_emails(modeladmin, request, queryset):
 
 # Define a description for the custom admin action
 process_pdf_and_send_emails.short_description = "Generate PDFs and Send Emails"
+
 
 
 def process_sheet_and_send_emails(modeladmin, request, queryset):
@@ -86,10 +89,12 @@ def process_sheet_and_send_emails(modeladmin, request, queryset):
         # Iterate through sheets in the Excel file
         for sheet_name in wb.sheetnames:
             # Check if a teacher with this sheet_name exists
-            try:
-                teacher = Teacher.objects.get(sheet_name=sheet_name)
-            except Teacher.DoesNotExist:
+            teachers = Teacher.objects.filter(sheet_name = sheet_name)
+
+            if not teachers:
                 continue
+            
+            emails = [teacher.email for teacher in teachers]
 
             # Create a new Excel workbook containing only this sheet
             buffer = BytesIO()
@@ -102,19 +107,19 @@ def process_sheet_and_send_emails(modeladmin, request, queryset):
                     new_ws[cell.coordinate] = cell.value
 
             new_wb.save(buffer)
-
-            # Send the Excel sheet to the teacher's email
-            subject = f'{teacher.name}! Your Excel Sheet'
-            message = 'Please find the attached Excel sheet for your review.'
+            
+            # Iterate through each teacher and send the Excel sheet
+            subject = f'Your Excel Sheet'
+            message = 'Here is your Excel sheet.'
             from_email = os.environ.get("EMAIL_FROM")
-            recipient_list = [teacher.email]
-
+            recipient_list = emails
             excel_sheet = buffer.getvalue()
             buffer.close()
 
             email = EmailMessage(subject, message, from_email, recipient_list)
             email.attach(f'{sheet_name}.xlsx', excel_sheet, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             email.send()
+
 
     # Provide feedback to the admin user
     modeladmin.message_user(request, "Emails sent for selected Excel files.")
